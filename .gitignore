@@ -1,0 +1,7 @@
+lib/
+*.exe
+*.compiled
+*.o
+*.ppu
+backup/
+.superpowers/
