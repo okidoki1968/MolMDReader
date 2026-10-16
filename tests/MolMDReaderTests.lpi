@@ -26,6 +26,9 @@
       <Item>
         <PackageName Value="FCL"/>
       </Item>
+      <Item>
+        <PackageName Value="LazUtils"/>
+      </Item>
     </RequiredPackages>
     <Units>
       <Unit>

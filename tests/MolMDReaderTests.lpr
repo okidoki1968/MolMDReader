@@ -3,8 +3,8 @@ program MolMDReaderTests;
 {$MODE Delphi}
 
 uses
-  Classes, consoletestrunner,
-  uTestSettings, uTestFileTree, uTestNavHistory, uTestMdPrepare;
+  Classes, LazUTF8, consoletestrunner,
+  uTestSettings, uTestFileTree, uTestNavHistory, uTestMdPrepare, uTestSearch;
 
 type
   TMyRunner = class(TTestRunner)
