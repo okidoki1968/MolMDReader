@@ -4,7 +4,7 @@ program MolMDReaderTests;
 
 uses
   Classes, LazUTF8, consoletestrunner,
-  uTestSettings, uTestFileTree, uTestNavHistory, uTestMdPrepare, uTestSearch;
+  uTestSettings, uTestFileTree, uTestNavHistory, uTestMdPrepare, uTestSearch, uTestMdRender;
 
 type
   TMyRunner = class(TTestRunner)
