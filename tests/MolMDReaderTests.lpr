@@ -3,7 +3,8 @@ program MolMDReaderTests;
 {$MODE Delphi}
 
 uses
-  Classes, consoletestrunner;
+  Classes, consoletestrunner,
+  uTestSettings;
 
 type
   TMyRunner = class(TTestRunner)
