@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, ExtCtrls, ComCtrls, StdCtrls, Dialogs, Menus,
-  LCLType, LCLIntf, Messages, fpjson, jsonparser,
+  Types, LCLType, LCLIntf, Messages, Windows, fpjson, jsonparser,
   uWVBrowser, uWVWindowParent, uWVLoader, uWVBrowserBase, uWVTypes, uWVEvents,
   uWVCoreWebView2Args, uWVTypeLibrary,
   uSettings, uFileTree, uNavHistory, uMdPrepare, uMdRender, uSearch;
@@ -41,7 +41,9 @@ type
     FSelecting: Boolean;
     FShownFileAge: LongInt;
     FMissingShown: Boolean;
+    FThemeFg, FThemePanelBg: TColor;
     FSearchEdit: TEdit;
+    FThemeCombo: TComboBox;
     FScopeCombo: TComboBox;
     FResultList: TListBox;
     FSearchTimer: TTimer;
@@ -57,6 +59,16 @@ type
     procedure StartSearch;
     procedure CancelSearch;
     procedure FormKeyDownHandler(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure ThemeChange(Sender: TObject);
+    procedure TreeAdvancedDraw(Sender: TCustomTreeView; Node: TTreeNode; State: TCustomDrawState;
+      Stage: TCustomDrawStage; var PaintImages, DefaultDraw: Boolean);
+    procedure StatusDrawPanel(StatusBar: TStatusBar; Panel: TStatusPanel; const ARect: TRect);
+    procedure ApplyTheme;
+    procedure FocusSearch;
+    procedure DoRefresh;
+    procedure ShowRuntimeMissing;
+    procedure BrowserInitError(Sender: TObject; aErrorCode: HRESULT; const aErrorMessage: wvstring);
+    procedure BrowserAccelerator(Sender: TObject; const aController: ICoreWebView2Controller; const aArgs: ICoreWebView2AcceleratorKeyPressedEventArgs);
     procedure BuildUi;
     procedure TryCreateBrowser;
     procedure InitTimerTick(Sender: TObject);
@@ -101,8 +113,12 @@ var
 
 implementation
 
+function SetWindowTheme(hwnd: HWND; pszSubAppName, pszSubIdList: PWideChar): HRESULT; stdcall; external 'uxtheme.dll';
+
 const
-  WelcomeMd = '# MolMDReader'#10#10 + 'Kies een map met markdown-bestanden via **Map openen...** bovenaan.';
+  TVM_SETBKCOLOR = $111D;
+  TVM_SETTEXTCOLOR = $111E;
+  WelcomeMd ='# MolMDReader'#10#10 + 'Kies een map met markdown-bestanden via **Map openen...** bovenaan.';
 
 { TMainForm }
 
@@ -119,6 +135,8 @@ begin
   FSettings.Load;
   FSettings.ValidatePaths;
   FHistory := TNavHistory.Create;
+  if FSettings.CurrentFile <> '' then
+    FHistory.Visit(FSettings.CurrentFile);
   BuildUi;
   OnClose := FormCloseHandler;
   if FSettings.RootDir <> '' then
@@ -126,6 +144,7 @@ begin
   RefreshFavorites;
   UpdateNavButtons;
   UpdateStatus;
+  ApplyTheme;
 end;
 
 destructor TMainForm.Destroy;
@@ -146,6 +165,10 @@ begin
   FStatus.Panels.Add.Width := 360;
   FStatus.Panels.Add.Width := 220;
   FStatus.Panels.Add.Width := 160;
+  FStatus.Panels[0].Style := psOwnerDraw;
+  FStatus.Panels[1].Style := psOwnerDraw;
+  FStatus.Panels[2].Style := psOwnerDraw;
+  FStatus.OnDrawPanel := StatusDrawPanel;
 
   FTopPanel := TPanel.Create(Self);
   FTopPanel.Parent := Self;
@@ -189,6 +212,18 @@ begin
   FSearchEdit.TextHint := 'Zoeken (Ctrl+F)...';
   FSearchEdit.OnChange := SearchEditChange;
   FSearchEdit.OnKeyDown := SearchEditKeyDown;
+
+  FThemeCombo := TComboBox.Create(Self);
+  FThemeCombo.Parent := FTopPanel;
+  FThemeCombo.SetBounds(802, 9, 110, 26);
+  FThemeCombo.Style := csDropDownList;
+  FThemeCombo.Items.Add('Systeem');
+  FThemeCombo.Items.Add('Licht');
+  FThemeCombo.Items.Add('Donker');
+  FThemeCombo.ItemIndex := Ord(FSettings.Theme);
+  FThemeCombo.Hint := 'Thema';
+  FThemeCombo.ShowHint := True;
+  FThemeCombo.OnChange := ThemeChange;
 
   KeyPreview := True;
   OnKeyDown := FormKeyDownHandler;
@@ -263,6 +298,7 @@ begin
   FTreeView.RowSelect := True;
   FTreeView.ShowRoot := True;
   FTreeView.OnChange := TreeChange;
+  FTreeView.OnAdvancedCustomDrawItem := TreeAdvancedDraw;
 
   FResultList := TListBox.Create(Self);
   FResultList.Parent := FLeftPanel;
@@ -280,6 +316,8 @@ begin
   FBrowser.OnWebMessageReceived := BrowserWebMessage;
   FBrowser.OnNavigationStarting := BrowserNavStarting;
   FBrowser.OnNewWindowRequested := BrowserNewWindow;
+  FBrowser.OnInitializationError := BrowserInitError;
+  FBrowser.OnAcceleratorKeyPressed := BrowserAccelerator;
 
   FInitTimer := TTimer.Create(Self);
   FInitTimer.Enabled := False;
@@ -294,13 +332,14 @@ end;
 procedure TMainForm.DoShow;
 begin
   inherited;
+  ApplyTheme;
   TryCreateBrowser;
 end;
 
 procedure TMainForm.TryCreateBrowser;
 begin
   if GlobalWebView2Loader.InitializationError then
-    Application.MessageBox(PChar(UTF8Encode(GlobalWebView2Loader.ErrorMessage)), 'WebView2', MB_OK)
+    ShowRuntimeMissing
   else if GlobalWebView2Loader.Initialized then
     FBrowser.CreateBrowser(FBrowserParent.Handle)
   else
@@ -607,7 +646,7 @@ var
 begin
   if Button = mbRight then
   begin
-    I := FFavList.ItemAtPos(Point(X, Y), True);
+    I := FFavList.ItemAtPos(Types.Point(X, Y), True);
     if I >= 0 then
       FFavList.ItemIndex := I;
   end;
@@ -748,14 +787,191 @@ begin
   end;
 end;
 
+procedure TMainForm.FocusSearch;
+begin
+  FSearchEdit.SetFocus;
+  FSearchEdit.SelectAll;
+end;
+
+procedure TMainForm.DoRefresh;
+begin
+  if FSettings.RootDir = '' then
+    Exit;
+  LoadTree;
+  if (FSettings.CurrentFile <> '') and FileExists(FSettings.CurrentFile) then
+    RenderFile(FSettings.CurrentFile, '');
+  UpdateStatus;
+end;
+
 procedure TMainForm.FormKeyDownHandler(Sender: TObject; var Key: Word; Shift: TShiftState);
 begin
   if (Key = Ord('F')) and (ssCtrl in Shift) then
   begin
-    FSearchEdit.SetFocus;
-    FSearchEdit.SelectAll;
+    FocusSearch;
+    Key := 0;
+  end
+  else if (Key = VK_LEFT) and (ssAlt in Shift) then
+  begin
+    BackClick(nil);
+    Key := 0;
+  end
+  else if (Key = VK_RIGHT) and (ssAlt in Shift) then
+  begin
+    ForwardClick(nil);
+    Key := 0;
+  end
+  else if Key = VK_F5 then
+  begin
+    DoRefresh;
     Key := 0;
   end;
+end;
+
+procedure TMainForm.BrowserAccelerator(Sender: TObject; const aController: ICoreWebView2Controller; const aArgs: ICoreWebView2AcceleratorKeyPressedEventArgs);
+var
+  A: TCoreWebView2AcceleratorKeyPressedEventArgs;
+  VK: LongWord;
+  Ctrl, Alt: Boolean;
+begin
+  A := TCoreWebView2AcceleratorKeyPressedEventArgs.Create(aArgs);
+  try
+    if (A.KeyEventKind <> COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN) and
+       (A.KeyEventKind <> COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN) then
+      Exit;
+    VK := A.VirtualKey;
+    Ctrl := GetKeyState(VK_CONTROL) < 0;
+    Alt := GetKeyState(VK_MENU) < 0;
+    if Ctrl and (VK = Ord('F')) then
+    begin
+      A.Handled := True;
+      FocusSearch;
+    end
+    else if Alt and (VK = VK_LEFT) then
+    begin
+      A.Handled := True;
+      BackClick(nil);
+    end
+    else if Alt and (VK = VK_RIGHT) then
+    begin
+      A.Handled := True;
+      ForwardClick(nil);
+    end
+    else if VK = VK_F5 then
+    begin
+      A.Handled := True;
+      DoRefresh;
+    end;
+  finally
+    A.Free;
+  end;
+end;
+
+procedure TMainForm.ShowRuntimeMissing;
+const
+  RuntimeUrl = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';
+begin
+  if Application.MessageBox(
+    PChar('MolMDReader heeft de Microsoft Edge WebView2-runtime nodig, maar die kon niet worden gestart.' + LineEnding + LineEnding +
+      'Wil je de downloadpagina openen?'), 'WebView2-runtime ontbreekt', MB_YESNO or MB_ICONERROR) = IDYES then
+    OpenURL(RuntimeUrl);
+  Application.Terminate;
+end;
+
+procedure TMainForm.BrowserInitError(Sender: TObject; aErrorCode: HRESULT; const aErrorMessage: wvstring);
+begin
+  ShowRuntimeMissing;
+end;
+
+procedure TMainForm.ThemeChange(Sender: TObject);
+begin
+  FSettings.Theme := TThemeMode(FThemeCombo.ItemIndex);
+  FSettings.Save;
+  ApplyTheme;
+  if FBrowserReady then
+  begin
+    if (FSettings.CurrentFile <> '') and FileExists(FSettings.CurrentFile) then
+      RenderFile(FSettings.CurrentFile, '')
+    else
+      ShowMessagePage(WelcomeMd);
+  end;
+end;
+
+procedure TMainForm.ApplyTheme;
+var
+  Dark: Boolean;
+  Bg, PanelBg, Fg: TColor;
+begin
+  Dark := ResolveDark(FSettings.Theme);
+  if Dark then
+  begin
+    Bg := TColor($211D1B);
+    PanelBg := TColor($2C2724);
+    Fg := TColor($E8E4E1);
+  end
+  else
+  begin
+    Bg := clWindow;
+    PanelBg := clBtnFace;
+    Fg := clWindowText;
+  end;
+  Color := PanelBg;
+  Font.Color := Fg;
+  FTopPanel.Color := PanelBg;
+  FLeftPanel.Color := PanelBg;
+  FFavPanel.Color := PanelBg;
+  FFavHeader.Color := PanelBg;
+  FFavHeader.Font.Color := Fg;
+  FFavList.Color := Bg;
+  FFavList.Font.Color := Fg;
+  FTreeView.Color := Bg;
+  FTreeView.Font.Color := Fg;
+  FResultList.Color := Bg;
+  FResultList.Font.Color := Fg;
+  // native edit/combo controls keep system colors so their text stays readable
+  FSearchEdit.ParentColor := False;
+  FSearchEdit.Color := clWindow;
+  FSearchEdit.Font.Color := clWindowText;
+  FScopeCombo.ParentColor := False;
+  FScopeCombo.Color := clWindow;
+  FScopeCombo.Font.Color := clWindowText;
+  FThemeCombo.ParentColor := False;
+  FThemeCombo.Color := clWindow;
+  FThemeCombo.Font.Color := clWindowText;
+  FThemeFg := Fg;
+  FThemePanelBg := PanelBg;
+  FStatus.Invalidate;
+  if FTreeView.HandleAllocated then
+  begin
+    if Dark then
+      SetWindowTheme(FTreeView.Handle, '', '')
+    else
+      SetWindowTheme(FTreeView.Handle, 'Explorer', nil);
+    SendMessage(FTreeView.Handle, TVM_SETTEXTCOLOR, 0, LPARAM(ColorToRGB(Fg)));
+    SendMessage(FTreeView.Handle, TVM_SETBKCOLOR, 0, LPARAM(ColorToRGB(Bg)));
+  end;
+  FTreeView.Invalidate;
+end;
+
+
+procedure TMainForm.TreeAdvancedDraw(Sender: TCustomTreeView; Node: TTreeNode; State: TCustomDrawState;
+  Stage: TCustomDrawStage; var PaintImages, DefaultDraw: Boolean);
+begin
+  if Stage = cdPrePaint then
+  begin
+    if cdsSelected in State then
+      Sender.Canvas.Font.Color := clHighlightText
+    else
+      Sender.Canvas.Font.Color := FThemeFg;
+  end;
+  DefaultDraw := True;
+end;
+
+procedure TMainForm.StatusDrawPanel(StatusBar: TStatusBar; Panel: TStatusPanel; const ARect: TRect);
+begin
+  StatusBar.Canvas.Brush.Color := FThemePanelBg;
+  StatusBar.Canvas.FillRect(ARect);
+  StatusBar.Canvas.Font.Color := FThemeFg;
+  StatusBar.Canvas.TextOut(ARect.Left + 4, ARect.Top + 2, Panel.Text);
 end;
 
 procedure TMainForm.ScopeChange(Sender: TObject);
@@ -835,7 +1051,7 @@ end;
 
 initialization
   GlobalWebView2Loader := TWVLoader.Create(nil);
-  GlobalWebView2Loader.UserDataFolder := UTF8Decode(GetEnvironmentVariable('APPDATA') + '\MolMDReader\webview');
+  GlobalWebView2Loader.UserDataFolder := UTF8Decode(SysUtils.GetEnvironmentVariable('APPDATA') + '\MolMDReader\webview');
   GlobalWebView2Loader.StartWebView2;
 
 end.
