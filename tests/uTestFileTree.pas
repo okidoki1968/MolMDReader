@@ -23,6 +23,7 @@ type
     procedure TestMissingRootGivesEmptyNode;
     procedure TestDoesNotFollowJunctionLoop;
     procedure TestCountMdFiles;
+    procedure TestOnlyRealLinksAreSkipped;
   end;
 
 implementation
@@ -160,6 +161,15 @@ begin
   finally
     N.Free;
   end;
+end;
+
+procedure TTestFileTree.TestOnlyRealLinksAreSkipped;
+begin
+  AssertTrue('junction', IsRealLinkTag($A0000003));
+  AssertTrue('symlink', IsRealLinkTag($A000000C));
+  AssertFalse('OneDrive cloud placeholder', IsRealLinkTag($9000001A));
+  AssertFalse('OneDrive folder', IsRealLinkTag($9000601A));
+  AssertFalse('no tag', IsRealLinkTag(0));
 end;
 
 initialization

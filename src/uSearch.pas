@@ -103,7 +103,7 @@ begin
             Continue;
           if (SR.Attr and faDirectory) <> 0 then
           begin
-            if (SR.Attr and faSymLink) = 0 then
+            if not IsLinkedDir(SR) then
               Names.AddObject(SR.Name, TObject(PtrInt(1)));
           end
           else if IsMdFileName(SR.Name) then

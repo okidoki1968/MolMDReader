@@ -5,7 +5,7 @@ unit uMdPrepare;
 interface
 
 uses
-  Classes, SysUtils, httpprotocol;
+  Classes, SysUtils, StrUtils, uFileTree;
 
 type
   TLinkKind = (lkExternal, lkMarkdown, lkAnchor, lkBlocked);
@@ -19,6 +19,7 @@ function ConvertWikiLinks(const Text, BaseDir, RootDir: string): string;
 function ClassifyLink(const Href, BaseDir: string; out ResolvedPath: string): TLinkKind;
 function FindMdByName(const Dir, FileName: string): string;
 function UrlEncodePath(const S: string): string;
+function PercentDecode(const S: string): string;
 
 implementation
 
@@ -129,6 +130,29 @@ begin
   end;
 end;
 
+function PercentDecode(const S: string): string;
+var
+  I, V: Integer;
+begin
+  Result := '';
+  I := 1;
+  while I <= Length(S) do
+  begin
+    if (S[I] = '%') and (I + 2 <= Length(S)) then
+    begin
+      V := StrToIntDef('$' + Copy(S, I + 1, 2), -1);
+      if V >= 0 then
+      begin
+        Result := Result + Chr(V);
+        Inc(I, 3);
+        Continue;
+      end;
+    end;
+    Result := Result + S[I];
+    Inc(I);
+  end;
+end;
+
 function UrlEncodePath(const S: string): string;
 var
   I: Integer;
@@ -159,7 +183,7 @@ begin
     repeat
       if (SR.Name = '.') or (SR.Name = '..') then
         Continue;
-      if ((SR.Attr and faDirectory) = 0) or ((SR.Attr and faSymLink) <> 0) then
+      if ((SR.Attr and faDirectory) = 0) or IsLinkedDir(SR) then
         Continue;
       Sub := FindMdByName(Dir + '\' + SR.Name, FileName);
       if Sub <> '' then
@@ -170,65 +194,178 @@ begin
   end;
 end;
 
-function ConvertWikiLinks(const Text, BaseDir, RootDir: string): string;
+type
+  TWikiResolver = class
+  private
+    FBaseDir, FRootDir: string;
+    FNames: TStringList;
+    FPaths: TStringList;
+    FBuilt: Boolean;
+    procedure Collect(const Dir: string);
+    procedure Build;
+  public
+    constructor Create(const ABaseDir, ARootDir: string);
+    destructor Destroy; override;
+    function Resolve(const Target: string): string;
+  end;
+
+constructor TWikiResolver.Create(const ABaseDir, ARootDir: string);
+begin
+  inherited Create;
+  FBaseDir := ExcludeTrailingPathDelimiter(ABaseDir);
+  FRootDir := ExcludeTrailingPathDelimiter(ARootDir);
+  FNames := TStringList.Create;
+  FNames.Sorted := True;
+  FNames.CaseSensitive := False;
+  FNames.Duplicates := dupIgnore;
+  FPaths := TStringList.Create;
+end;
+
+destructor TWikiResolver.Destroy;
+begin
+  FNames.Free;
+  FPaths.Free;
+  inherited;
+end;
+
+procedure TWikiResolver.Collect(const Dir: string);
 var
-  P, Q: Integer;
-  Inner, Target, Caption, Found, Rel: string;
-  Bar, Hash, Slash: Integer;
+  SR: TSearchRec;
+  Idx: Integer;
+begin
+  if FindFirst(Dir + '\*', faAnyFile, SR) <> 0 then
+    Exit;
+  try
+    repeat
+      if (SR.Name = '.') or (SR.Name = '..') then
+        Continue;
+      if (SR.Attr and faDirectory) <> 0 then
+      begin
+        if not IsLinkedDir(SR) then
+          Collect(Dir + '\' + SR.Name);
+      end
+      else if IsMdFileName(SR.Name) then
+      begin
+        if not FNames.Find(SR.Name, Idx) then
+        begin
+          FPaths.Add(Dir + '\' + SR.Name);
+          FNames.AddObject(SR.Name, TObject(PtrInt(FPaths.Count - 1)));
+        end;
+      end;
+    until FindNext(SR) <> 0;
+  finally
+    FindClose(SR);
+  end;
+end;
+
+procedure TWikiResolver.Build;
+begin
+  FBuilt := True;
+  Collect(FBaseDir);
+  if not SameText(FBaseDir, FRootDir) then
+    Collect(FRootDir);
+end;
+
+function TWikiResolver.Resolve(const Target: string): string;
+var
+  Idx: Integer;
 begin
   Result := '';
-  P := 1;
-  while P <= Length(Text) do
+  if Target = '' then
+    Exit;
+  if FileExists(FBaseDir + '\' + Target + '.md') then
+    Exit(FBaseDir + '\' + Target + '.md');
+  if not FBuilt then
+    Build;
+  if FNames.Find(Target + '.md', Idx) then
+    Result := FPaths[PtrInt(FNames.Objects[Idx])];
+end;
+
+function ConvertWikiLine(const Line: string; Resolver: TWikiResolver; const BaseDir: string): string;
+var
+  I, Close, Bar, Hash, Slash: Integer;
+  InCode: Boolean;
+  Inner, Target, Caption, Found, Rel: string;
+begin
+  Result := '';
+  InCode := False;
+  I := 1;
+  while I <= Length(Line) do
   begin
-    Q := Pos('[[', Copy(Text, P, MaxInt));
-    if Q = 0 then
+    if Line[I] = '`' then
+      InCode := not InCode;
+    if (not InCode) and (Line[I] = '[') and (Copy(Line, I, 2) = '[[') then
     begin
-      Result := Result + Copy(Text, P, MaxInt);
-      Break;
+      Close := PosEx(']]', Line, I + 2);
+      if Close > 0 then
+      begin
+        Inner := Copy(Line, I + 2, Close - I - 2);
+        Bar := Pos('|', Inner);
+        if Bar > 0 then
+        begin
+          Target := Copy(Inner, 1, Bar - 1);
+          Caption := Copy(Inner, Bar + 1, MaxInt);
+        end
+        else
+        begin
+          Target := Inner;
+          Caption := Inner;
+        end;
+        Hash := Pos('#', Target);
+        if Hash > 0 then
+          Target := Copy(Target, 1, Hash - 1);
+        Slash := LastDelimiter('/\', Target);
+        if Slash > 0 then
+          Target := Copy(Target, Slash + 1, MaxInt);
+        Found := Resolver.Resolve(Target);
+        if Found = '' then
+          Result := Result + '[' + Caption + '](#niet-gevonden)'
+        else
+        begin
+          Rel := ExtractRelativePath(IncludeTrailingPathDelimiter(BaseDir), Found);
+          Rel := StringReplace(Rel, '\', '/', [rfReplaceAll]);
+          Result := Result + '[' + Caption + '](' + UrlEncodePath(Rel) + ')';
+        end;
+        I := Close + 2;
+        Continue;
+      end;
     end;
-    Q := P + Q - 1;
-    Result := Result + Copy(Text, P, Q - P);
-    P := Pos(']]', Copy(Text, Q + 2, MaxInt));
-    if P = 0 then
+    Result := Result + Line[I];
+    Inc(I);
+  end;
+end;
+
+function ConvertWikiLinks(const Text, BaseDir, RootDir: string): string;
+var
+  Lines: TStringList;
+  Resolver: TWikiResolver;
+  I: Integer;
+  InFence: Boolean;
+  T: string;
+begin
+  if Pos('[[', Text) = 0 then
+    Exit(Text);
+  Lines := TStringList.Create;
+  Resolver := TWikiResolver.Create(BaseDir, RootDir);
+  try
+    Lines.LineBreak := #10;
+    Lines.TextLineBreakStyle := tlbsLF;
+    Lines.Text := Text;
+    InFence := False;
+    for I := 0 to Lines.Count - 1 do
     begin
-      Result := Result + Copy(Text, Q, MaxInt);
-      Break;
+      T := TrimLeft(Lines[I]);
+      if (Copy(T, 1, 3) = '```') or (Copy(T, 1, 3) = '~~~') then
+        InFence := not InFence
+      else if not InFence then
+        Lines[I] := ConvertWikiLine(Lines[I], Resolver, BaseDir);
     end;
-    P := Q + 2 + P - 1;
-    Inner := Copy(Text, Q + 2, P - Q - 2);
-    Bar := Pos('|', Inner);
-    if Bar > 0 then
-    begin
-      Target := Copy(Inner, 1, Bar - 1);
-      Caption := Copy(Inner, Bar + 1, MaxInt);
-    end
-    else
-    begin
-      Target := Inner;
-      Caption := Inner;
-    end;
-    Hash := Pos('#', Target);
-    if Hash > 0 then
-      Target := Copy(Target, 1, Hash - 1);
-    Slash := LastDelimiter('/\', Target);
-    if Slash > 0 then
-      Target := Copy(Target, Slash + 1, MaxInt);
-    Found := '';
-    if Target <> '' then
-    begin
-      Found := FindMdByName(ExcludeTrailingPathDelimiter(BaseDir), Target + '.md');
-      if (Found = '') and not SameText(BaseDir, RootDir) then
-        Found := FindMdByName(ExcludeTrailingPathDelimiter(RootDir), Target + '.md');
-    end;
-    if Found = '' then
-      Result := Result + '[' + Caption + '](#niet-gevonden)'
-    else
-    begin
-      Rel := ExtractRelativePath(IncludeTrailingPathDelimiter(BaseDir), Found);
-      Rel := StringReplace(Rel, '\', '/', [rfReplaceAll]);
-      Result := Result + '[' + Caption + '](' + UrlEncodePath(Rel) + ')';
-    end;
-    P := P + 2;
+    Result := Lines.Text;
+    if (Text <> '') and (Text[Length(Text)] <> #10) and (Result <> '') and (Result[Length(Result)] = #10) then
+      SetLength(Result, Length(Result) - 1);
+  finally
+    Resolver.Free;
+    Lines.Free;
   end;
 end;
 
@@ -250,7 +387,7 @@ begin
   I := Pos('?', PathPart);
   if I > 0 then
     PathPart := Copy(PathPart, 1, I - 1);
-  PathPart := HTTPDecode(PathPart);
+  PathPart := PercentDecode(PathPart);
   if Pos(':', PathPart) > 0 then
     Exit(lkBlocked);
   PathPart := StringReplace(PathPart, '/', '\', [rfReplaceAll]);

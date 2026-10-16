@@ -5,7 +5,7 @@ unit uFileTree;
 interface
 
 uses
-  Classes, SysUtils, contnrs;
+  Classes, SysUtils, contnrs, Windows;
 
 type
   TMdNode = class
@@ -21,6 +21,8 @@ type
 function ScanMdTree(const Root: string): TMdNode;
 function CountMdFiles(Node: TMdNode): Integer;
 function IsMdFileName(const Name: string): Boolean;
+function IsRealLinkTag(Tag: LongWord): Boolean;
+function IsLinkedDir(const SR: TSearchRec): Boolean;
 
 implementation
 
@@ -42,6 +44,17 @@ end;
 function IsMdFileName(const Name: string): Boolean;
 begin
   Result := SameText(ExtractFileExt(Name), '.md');
+end;
+
+function IsRealLinkTag(Tag: LongWord): Boolean;
+begin
+  // junctions (mount points) and symbolic links; cloud placeholders such as OneDrive are not links
+  Result := (Tag = $A0000003) or (Tag = $A000000C);
+end;
+
+function IsLinkedDir(const SR: TSearchRec): Boolean;
+begin
+  Result := ((SR.Attr and faSymLink) <> 0) and IsRealLinkTag(SR.FindData.dwReserved0);
 end;
 
 function NodeCompare(A, B: Pointer): Integer;
@@ -76,7 +89,7 @@ begin
       Path := Node.FullPath + '\' + SR.Name;
       if (SR.Attr and faDirectory) <> 0 then
       begin
-        if (SR.Attr and faSymLink) <> 0 then
+        if IsLinkedDir(SR) then
           Continue;
         Child := TMdNode.Create(SR.Name, Path, True);
         ScanInto(Child);
@@ -89,7 +102,7 @@ begin
         Node.Children.Add(TMdNode.Create(SR.Name, Path, False));
     until FindNext(SR) <> 0;
   finally
-    FindClose(SR);
+    SysUtils.FindClose(SR);
   end;
   Node.Children.Sort(NodeCompare);
 end;

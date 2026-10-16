@@ -25,6 +25,9 @@ type
     procedure TestWikiLinkMissingTarget;
     procedure TestClassifyExternal;
     procedure TestClassifyMdWithSpacesAndAnchor;
+    procedure TestWikiLinkIgnoredInCode;
+    procedure TestWikiLinkUnclosedDoesNotSwallowNextLines;
+    procedure TestClassifyPlusInFileName;
     procedure TestClassifyUnicodeFileName;
     procedure TestClassifyUnknownExtensionBlocked;
     procedure TestClassifyMissingMdBlocked;
@@ -141,6 +144,35 @@ var
 begin
   S := ConvertWikiLinks('Zie [[Bestaat Niet]].', FRoot, FRoot);
   AssertEquals('Zie [Bestaat Niet](#niet-gevonden).', S);
+end;
+
+procedure TTestMdPrepare.TestWikiLinkIgnoredInCode;
+var
+  Src: string;
+begin
+  Touch('Doel.md');
+  Src := '```bash'#10'if [[ -f "$f" ]]; then'#10'```'#10'Inline `[[Doel]]` hier.'#10'Echt [[Doel]].';
+  AssertEquals('```bash'#10'if [[ -f "$f" ]]; then'#10'```'#10'Inline `[[Doel]]` hier.'#10'Echt [Doel](Doel.md).',
+    ConvertWikiLinks(Src, FRoot, FRoot));
+end;
+
+procedure TTestMdPrepare.TestWikiLinkUnclosedDoesNotSwallowNextLines;
+var
+  Src: string;
+begin
+  Src := 'Open [[ zonder sluiting'#10'# Kop'#10'Later ]] einde';
+  AssertEquals(Src, ConvertWikiLinks(Src, FRoot, FRoot));
+end;
+
+procedure TTestMdPrepare.TestClassifyPlusInFileName;
+var
+  P: string;
+begin
+  Touch('C++ notes.md');
+  Touch('a+b.md');
+  AssertTrue(ClassifyLink('C++%20notes.md', FRoot, P) = lkMarkdown);
+  AssertEquals(FRoot + '\C++ notes.md', P);
+  AssertTrue(ClassifyLink('a+b.md', FRoot, P) = lkMarkdown);
 end;
 
 procedure TTestMdPrepare.TestClassifyExternal;
