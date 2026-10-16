@@ -4,7 +4,7 @@ program MolMDReaderTests;
 
 uses
   Classes, consoletestrunner,
-  uTestSettings, uTestFileTree;
+  uTestSettings, uTestFileTree, uTestNavHistory;
 
 type
   TMyRunner = class(TTestRunner)
