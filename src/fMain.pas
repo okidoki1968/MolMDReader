@@ -9,7 +9,7 @@ uses
   LCLType, LCLIntf, Messages, fpjson, jsonparser,
   uWVBrowser, uWVWindowParent, uWVLoader, uWVBrowserBase, uWVTypes, uWVEvents,
   uWVCoreWebView2Args, uWVTypeLibrary,
-  uSettings, uFileTree, uNavHistory, uMdPrepare, uMdRender;
+  uSettings, uFileTree, uNavHistory, uMdPrepare, uMdRender, uSearch;
 
 type
   TMainForm = class(TForm)
@@ -41,6 +41,22 @@ type
     FSelecting: Boolean;
     FShownFileAge: LongInt;
     FMissingShown: Boolean;
+    FSearchEdit: TEdit;
+    FScopeCombo: TComboBox;
+    FResultList: TListBox;
+    FSearchTimer: TTimer;
+    FSearchThread: TSearchThread;
+    FHits: TSearchHitArray;
+    procedure SearchEditChange(Sender: TObject);
+    procedure SearchEditKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure SearchTimerTick(Sender: TObject);
+    procedure SearchDone(const Hits: TSearchHitArray);
+    procedure ScopeChange(Sender: TObject);
+    procedure ResultClick(Sender: TObject);
+    procedure ShowResults(Visible: Boolean);
+    procedure StartSearch;
+    procedure CancelSearch;
+    procedure FormKeyDownHandler(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure BuildUi;
     procedure TryCreateBrowser;
     procedure InitTimerTick(Sender: TObject);
@@ -155,6 +171,33 @@ begin
   FForwardButton.Caption := '>';
   FForwardButton.OnClick := ForwardClick;
 
+  FScopeCombo := TComboBox.Create(Self);
+  FScopeCombo.Parent := FTopPanel;
+  FScopeCombo.SetBounds(236, 9, 130, 26);
+  FScopeCombo.Style := csDropDownList;
+  FScopeCombo.Items.Add('Huidige map');
+  FScopeCombo.Items.Add('Alles');
+  if FSettings.SearchAll then
+    FScopeCombo.ItemIndex := 1
+  else
+    FScopeCombo.ItemIndex := 0;
+  FScopeCombo.OnChange := ScopeChange;
+
+  FSearchEdit := TEdit.Create(Self);
+  FSearchEdit.Parent := FTopPanel;
+  FSearchEdit.SetBounds(374, 9, 420, 26);
+  FSearchEdit.TextHint := 'Zoeken (Ctrl+F)...';
+  FSearchEdit.OnChange := SearchEditChange;
+  FSearchEdit.OnKeyDown := SearchEditKeyDown;
+
+  KeyPreview := True;
+  OnKeyDown := FormKeyDownHandler;
+
+  FSearchTimer := TTimer.Create(Self);
+  FSearchTimer.Enabled := False;
+  FSearchTimer.Interval := 300;
+  FSearchTimer.OnTimer := SearchTimerTick;
+
   FLeftPanel := TPanel.Create(Self);
   FLeftPanel.Parent := Self;
   FLeftPanel.Align := alLeft;
@@ -220,6 +263,13 @@ begin
   FTreeView.RowSelect := True;
   FTreeView.ShowRoot := True;
   FTreeView.OnChange := TreeChange;
+
+  FResultList := TListBox.Create(Self);
+  FResultList.Parent := FLeftPanel;
+  FResultList.Align := alClient;
+  FResultList.BorderStyle := bsNone;
+  FResultList.Visible := False;
+  FResultList.OnClick := ResultClick;
 
   FBrowser := TWVBrowser.Create(Self);
   FBrowserParent := TWVWindowParent.Create(Self);
@@ -657,7 +707,116 @@ end;
 
 procedure TMainForm.FormCloseHandler(Sender: TObject; var CloseAction: TCloseAction);
 begin
+  CancelSearch;
   FSettings.Save;
+end;
+
+procedure TMainForm.ShowResults(Visible: Boolean);
+begin
+  FResultList.Visible := Visible;
+  FTreeView.Visible := not Visible;
+end;
+
+procedure TMainForm.CancelSearch;
+begin
+  FSearchTimer.Enabled := False;
+  if FSearchThread <> nil then
+  begin
+    FSearchThread.Cancel;
+    FSearchThread := nil;
+  end;
+end;
+
+procedure TMainForm.SearchEditChange(Sender: TObject);
+begin
+  CancelSearch;
+  if Trim(FSearchEdit.Text) = '' then
+  begin
+    SetLength(FHits, 0);
+    ShowResults(False);
+    Exit;
+  end;
+  FSearchTimer.Enabled := True;
+end;
+
+procedure TMainForm.SearchEditKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+begin
+  if Key = VK_ESCAPE then
+  begin
+    FSearchEdit.Text := '';
+    Key := 0;
+  end;
+end;
+
+procedure TMainForm.FormKeyDownHandler(Sender: TObject; var Key: Word; Shift: TShiftState);
+begin
+  if (Key = Ord('F')) and (ssCtrl in Shift) then
+  begin
+    FSearchEdit.SetFocus;
+    FSearchEdit.SelectAll;
+    Key := 0;
+  end;
+end;
+
+procedure TMainForm.ScopeChange(Sender: TObject);
+begin
+  FSettings.SearchAll := FScopeCombo.ItemIndex = 1;
+  FSettings.Save;
+  if Trim(FSearchEdit.Text) <> '' then
+    StartSearch;
+end;
+
+procedure TMainForm.SearchTimerTick(Sender: TObject);
+begin
+  FSearchTimer.Enabled := False;
+  StartSearch;
+end;
+
+procedure TMainForm.StartSearch;
+var
+  Dir: string;
+begin
+  CancelSearch;
+  if FSettings.RootDir = '' then
+    Exit;
+  if FSettings.SearchAll or (FSettings.CurrentDir = '') then
+    Dir := FSettings.RootDir
+  else
+    Dir := FSettings.CurrentDir;
+  FSearchThread := TSearchThread.Create(Dir, Trim(FSearchEdit.Text), SearchDone);
+end;
+
+procedure TMainForm.SearchDone(const Hits: TSearchHitArray);
+var
+  I: Integer;
+  Line: string;
+begin
+  FSearchThread := nil;
+  FHits := Hits;
+  FResultList.Items.BeginUpdate;
+  try
+    FResultList.Items.Clear;
+    for I := 0 to High(FHits) do
+    begin
+      Line := ExtractRelativePath(IncludeTrailingPathDelimiter(FSettings.RootDir), FHits[I].FilePath);
+      if FHits[I].NameMatch then
+        Line := Line + '   (bestandsnaam)'
+      else
+        Line := Line + ':' + IntToStr(FHits[I].Line) + '   ' + FHits[I].Snippet;
+      FResultList.Items.Add(Line);
+    end;
+    if Length(FHits) = 0 then
+      FResultList.Items.Add('Geen resultaten');
+  finally
+    FResultList.Items.EndUpdate;
+  end;
+  ShowResults(True);
+end;
+
+procedure TMainForm.ResultClick(Sender: TObject);
+begin
+  if (FResultList.ItemIndex >= 0) and (FResultList.ItemIndex <= High(FHits)) then
+    OpenFile(FHits[FResultList.ItemIndex].FilePath, True);
 end;
 
 procedure TMainForm.WMMove(var Msg: TWMMove);
