@@ -131,6 +131,7 @@ begin
   Width := 1200;
   Height := 780;
   Position := poScreenCenter;
+  WindowState := wsMaximized;
   Font.Name := 'Segoe UI';
   Font.Size := 10;
   FSettings := TAppSettings.Create(DefaultSettingsPath);
