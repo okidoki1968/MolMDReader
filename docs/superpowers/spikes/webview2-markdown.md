@@ -10,9 +10,10 @@
 
 ## Installatie
 
+WebView4Delphi is meegeleverd in `third_party/WebView4Delphi` (alleen `source/` en `packages/`, plus de MIT-licentie). Registreer het pakket eenmalig en bouw:
+
 ```
-git clone https://github.com/salvadordf/WebView4Delphi.git C:\Werk\Programming\_libs\WebView4Delphi
-lazbuild --add-package-link C:\Werk\Programming\_libs\WebView4Delphi\packages\webview4delphi.lpk
+lazbuild --add-package-link third_party\WebView4Delphi\packages\webview4delphi.lpk
 lazbuild MolMDReader.lpi
 ```
 
