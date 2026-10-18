@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, ExtCtrls, ComCtrls, StdCtrls, Dialogs, Menus,
-  Types, LCLType, LCLIntf, Messages, Windows, fpjson, jsonparser,
+  Types, LCLType, LCLIntf, LazUTF8, Messages, Windows, fpjson, jsonparser,
   uWVBrowser, uWVWindowParent, uWVLoader, uWVBrowserBase, uWVTypes, uWVEvents,
   uWVCoreWebView2Args, uWVTypeLibrary,
   uSettings, uFileTree, uNavHistory, uMdPrepare, uMdRender, uSearch;
@@ -70,6 +70,7 @@ type
     procedure BrowserInitError(Sender: TObject; aErrorCode: HRESULT; const aErrorMessage: wvstring);
     procedure BrowserAccelerator(Sender: TObject; const aController: ICoreWebView2Controller; const aArgs: ICoreWebView2AcceleratorKeyPressedEventArgs);
     procedure BuildUi;
+    procedure ApplyCommandLineFile;
     procedure TryCreateBrowser;
     procedure InitTimerTick(Sender: TObject);
     procedure WatchTimerTick(Sender: TObject);
@@ -134,6 +135,7 @@ begin
   FSettings := TAppSettings.Create(DefaultSettingsPath);
   FSettings.Load;
   FSettings.ValidatePaths;
+  ApplyCommandLineFile;
   FHistory := TNavHistory.Create;
   if FSettings.CurrentFile <> '' then
     FHistory.Visit(FSettings.CurrentFile);
@@ -153,6 +155,23 @@ begin
   FHistory.Free;
   FTree.Free;
   inherited;
+end;
+
+procedure TMainForm.ApplyCommandLineFile;
+var
+  F, Dir: string;
+begin
+  if ParamCount < 1 then
+    Exit;
+  F := ParamStrUTF8(1);
+  if (F = '') or (F[1] = '-') or not FileExists(F) or not IsMdFileName(F) then
+    Exit;
+  F := ExpandFileName(F);
+  Dir := ExtractFileDir(F);
+  if (FSettings.RootDir = '') or (Pos(LowerCase(FSettings.RootDir + '\'), LowerCase(F)) <> 1) then
+    FSettings.RootDir := Dir;
+  FSettings.CurrentDir := Dir;
+  FSettings.CurrentFile := F;
 end;
 
 procedure TMainForm.BuildUi;

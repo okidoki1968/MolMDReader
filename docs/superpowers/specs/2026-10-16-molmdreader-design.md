@@ -13,7 +13,7 @@ Frank wil een eenvoudige, snelle lezer voor markdown-notities op Windows, in de 
 - Bij elke wijziging de **huidige map en het geopende bestand opslaan**; bij het opstarten weer op die map en dat bestand staan.
 - Navigeren via links: klikken op een link naar een ander `.md`-bestand opent dat bestand; knoppen ◀ ▶ voor terug en vooruit.
 - Automatisch verversen als het getoonde bestand op schijf verandert.
-- Modern uiterlijk: licht en donker thema (volgt standaard de Windows-instelling, met een knop om te wisselen), vlak ontwerp, ruime witruimte, Segoe UI, kleine pictogrammen in de boom.
+- Modern uiterlijk: licht en donker thema (standaard licht, want donker was slecht leesbaar; keuze Systeem/Licht/Donker via een knop), vlak ontwerp, ruime witruimte, Segoe UI, kleine pictogrammen in de boom.
 
 ## Niet-doelen
 
@@ -54,3 +54,9 @@ Frank wil een eenvoudige, snelle lezer voor markdown-notities op Windows, in de 
 - Opbouw van de code, bestandsformaat van de instellingen, en details van de zoekfunctie (bijvoorbeeld op de achtergrond zoeken).
 - Exacte kleuren en pictogrammen, binnen de beschreven stijl.
 - Wat te doen als de opgeslagen map of het bestand niet meer bestaat bij het opstarten.
+
+## Latere aanvullingen (2026-10-18)
+
+- Een `.md`-bestand kan als opdrachtregelargument worden geopend; de map van dat bestand wordt de hoofdmap, tenzij het bestand al onder de huidige hoofdmap valt.
+- `MolMDReader.exe --register` koppelt `.md` aan het programma voor de huidige gebruiker (alleen HKCU, geen beheerdersrechten); `--unregister` maakt dat ongedaan.
+- Standaardthema is licht.

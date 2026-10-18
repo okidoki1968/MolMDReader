@@ -80,7 +80,7 @@ begin
   try
     S.Load;
     AssertEquals('', S.RootDir);
-    AssertTrue(S.Theme = tmSystem);
+    AssertTrue(S.Theme = tmLight);
     AssertFalse(S.SearchAll);
     AssertEquals(0, S.Favorites.Count);
   finally
@@ -104,7 +104,7 @@ begin
   try
     S.Load;
     AssertEquals('', S.RootDir);
-    AssertTrue(S.Theme = tmSystem);
+    AssertTrue(S.Theme = tmLight);
   finally
     S.Free;
   end;

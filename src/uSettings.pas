@@ -48,7 +48,7 @@ begin
   inherited Create;
   FFilePath := AFilePath;
   FFavorites := TStringList.Create;
-  Theme := tmSystem;
+  Theme := tmLight;
 end;
 
 destructor TAppSettings.Destroy;
@@ -68,7 +68,7 @@ begin
   RootDir := '';
   CurrentDir := '';
   CurrentFile := '';
-  Theme := tmSystem;
+  Theme := tmLight;
   SearchAll := False;
   FFavorites.Clear;
   if not FileExists(FFilePath) then
@@ -91,7 +91,7 @@ begin
     RootDir := O.Get('rootDir', '');
     CurrentDir := O.Get('currentDir', '');
     CurrentFile := O.Get('currentFile', '');
-    I := O.Get('theme', 0);
+    I := O.Get('theme', Ord(tmLight));
     if (I >= Ord(Low(TThemeMode))) and (I <= Ord(High(TThemeMode))) then
       Theme := TThemeMode(I);
     SearchAll := O.Get('searchAll', False);
