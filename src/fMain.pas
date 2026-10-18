@@ -43,6 +43,7 @@ type
     FMissingShown: Boolean;
     FThemeFg, FThemeBg, FThemePanelBg: TColor;
     FThemeDark: Boolean;
+    FFavHintIndex: Integer;
     FSearchEdit: TEdit;
     FThemeCombo: TComboBox;
     FScopeCombo: TComboBox;
@@ -86,6 +87,7 @@ type
     procedure FavListClick(Sender: TObject);
     procedure FavRemoveClick(Sender: TObject);
     procedure FavListMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure FavListMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
     procedure TreeChange(Sender: TObject; Node: TTreeNode);
     procedure FormCloseHandler(Sender: TObject; var CloseAction: TCloseAction);
     procedure LoadTree;
@@ -303,6 +305,9 @@ begin
   FFavList.PopupMenu := FFavMenu;
   FFavList.OnClick := FavListClick;
   FFavList.OnMouseDown := FavListMouseDown;
+  FFavList.OnMouseMove := FavListMouseMove;
+  FFavList.ShowHint := True;
+  FFavHintIndex := -1;
 
   FFavSplitter := TSplitter.Create(Self);
   FFavSplitter.Parent := FLeftPanel;
@@ -612,8 +617,35 @@ begin
 end;
 
 procedure TMainForm.RefreshFavorites;
+var
+  I, J: Integer;
+  Name, Parent: string;
+  Dup: Boolean;
 begin
-  FFavList.Items.Assign(FSettings.Favorites);
+  FFavList.Items.BeginUpdate;
+  try
+    FFavList.Items.Clear;
+    for I := 0 to FSettings.Favorites.Count - 1 do
+    begin
+      Name := ExtractFileName(ExcludeTrailingPathDelimiter(FSettings.Favorites[I]));
+      if Name = '' then
+        Name := FSettings.Favorites[I];
+      Dup := False;
+      for J := 0 to FSettings.Favorites.Count - 1 do
+        if (J <> I) and SameText(Name, ExtractFileName(ExcludeTrailingPathDelimiter(FSettings.Favorites[J]))) then
+          Dup := True;
+      if Dup then
+      begin
+        Parent := ExtractFileName(ExcludeTrailingPathDelimiter(ExtractFileDir(ExcludeTrailingPathDelimiter(FSettings.Favorites[I]))));
+        if Parent <> '' then
+          Name := Name + '  (' + Parent + ')';
+      end;
+      FFavList.Items.Add(Name);
+    end;
+  finally
+    FFavList.Items.EndUpdate;
+  end;
+  FFavHintIndex := -1;
 end;
 
 procedure TMainForm.OpenButtonClick(Sender: TObject);
@@ -652,7 +684,7 @@ var
 begin
   if FFavList.ItemIndex < 0 then
     Exit;
-  Dir := FFavList.Items[FFavList.ItemIndex];
+  Dir := FSettings.Favorites[FFavList.ItemIndex];
   if not DirectoryExists(Dir) then
   begin
     ShowMessage('Deze map bestaat niet meer: ' + Dir);
@@ -673,11 +705,26 @@ begin
   end;
 end;
 
+procedure TMainForm.FavListMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
+var
+  I: Integer;
+begin
+  I := FFavList.ItemAtPos(Types.Point(X, Y), True);
+  if I = FFavHintIndex then
+    Exit;
+  FFavHintIndex := I;
+  if I >= 0 then
+    FFavList.Hint := FSettings.Favorites[I]
+  else
+    FFavList.Hint := '';
+  Application.CancelHint;
+end;
+
 procedure TMainForm.FavRemoveClick(Sender: TObject);
 begin
   if FFavList.ItemIndex < 0 then
     Exit;
-  FSettings.RemoveFavorite(FFavList.Items[FFavList.ItemIndex]);
+  FSettings.RemoveFavorite(FSettings.Favorites[FFavList.ItemIndex]);
   FSettings.Save;
   RefreshFavorites;
 end;
