@@ -41,7 +41,8 @@ type
     FSelecting: Boolean;
     FShownFileAge: LongInt;
     FMissingShown: Boolean;
-    FThemeFg, FThemePanelBg: TColor;
+    FThemeFg, FThemeBg, FThemePanelBg: TColor;
+    FThemeDark: Boolean;
     FSearchEdit: TEdit;
     FThemeCombo: TComboBox;
     FScopeCombo: TComboBox;
@@ -957,6 +958,8 @@ begin
   FThemeCombo.Color := clWindow;
   FThemeCombo.Font.Color := clWindowText;
   FThemeFg := Fg;
+  FThemeBg := Bg;
+  FThemeDark := Dark;
   FThemePanelBg := PanelBg;
   FStatus.Invalidate;
   if FTreeView.HandleAllocated then
@@ -974,15 +977,34 @@ end;
 
 procedure TMainForm.TreeAdvancedDraw(Sender: TCustomTreeView; Node: TTreeNode; State: TCustomDrawState;
   Stage: TCustomDrawStage; var PaintImages, DefaultDraw: Boolean);
+var
+  R, Row: TRect;
+  C: TCanvas;
 begin
-  if Stage = cdPrePaint then
-  begin
-    if cdsSelected in State then
-      Sender.Canvas.Font.Color := clHighlightText
-    else
-      Sender.Canvas.Font.Color := FThemeFg;
-  end;
   DefaultDraw := True;
+  if not FThemeDark then
+    Exit;
+  if Stage = cdPostPaint then
+  begin
+    // the native tree ignores text colors in dark mode: repaint the label ourselves
+    C := Sender.Canvas;
+    R := Node.DisplayRect(True);
+    Row := Types.Rect(R.Left - 2, R.Top, Sender.ClientWidth, R.Bottom);
+    if cdsSelected in State then
+    begin
+      C.Brush.Color := TColor($784F26);
+      C.Font.Color := clWhite;
+    end
+    else
+    begin
+      C.Brush.Color := FThemeBg;
+      C.Font.Color := FThemeFg;
+    end;
+    C.FillRect(Row);
+    C.Brush.Style := bsClear;
+    C.TextOut(R.Left, R.Top + (R.Bottom - R.Top - C.TextHeight(Node.Text)) div 2, Node.Text);
+    C.Brush.Style := bsSolid;
+  end;
 end;
 
 procedure TMainForm.StatusDrawPanel(StatusBar: TStatusBar; Panel: TStatusPanel; const ARect: TRect);
