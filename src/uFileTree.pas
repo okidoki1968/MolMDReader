@@ -54,7 +54,7 @@ end;
 
 function IsLinkedDir(const SR: TSearchRec): Boolean;
 begin
-  Result := ((SR.Attr and faSymLink) <> 0) and IsRealLinkTag(SR.FindData.dwReserved0);
+  Result := ((SR.Attr and FILE_ATTRIBUTE_REPARSE_POINT) <> 0) and IsRealLinkTag(SR.FindData.dwReserved0);
 end;
 
 function NodeCompare(A, B: Pointer): Integer;
