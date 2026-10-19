@@ -136,7 +136,7 @@ function SearchFolder(const Dir, Query: string; Cancel: PBoolean): TSearchHitArr
 var
   Q: string;
 begin
-  SetLength(Result, 0);
+  Result := nil;
   Q := Trim(Query);
   if Q = '' then
     Exit;
